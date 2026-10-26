@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **POSIX backend (Linux / macOS).** `scripts/minas_smb.py` adds an
+  `smbclient`-based backend: `SmbPath` (the subset of the `pathlib` API the CLI
+  uses, every call shelling out to `smbclient`), plus `fs_copy2` /
+  `fs_copytree` / `fs_move` / `fs_rmtree` / `fs_disk_usage` replacements so the
+  command layer stays shared. Includes `smbclient -L` share listing, listing
+  and free-space parsers, and exit-code mapping (2 = path missing, 3 =
+  auth/network).
+- `selftest` subcommand: read-only environment check (platform, backend, how
+  credentials will be supplied, target share); `--raw` also dumps the
+  underlying `smbclient` output, which is what you need when a server's listing
+  format differs from the expected one.
+- Offline tests for the backend: path handling, listing / free-space parsing,
+  copy / move / rmtree, and password-file precedence.
+
+### Fixed
+
+- POSIX: the SMB password never reaches a process command line — credentials go
+  into a `0600` auth file passed as `smbclient -A`, removed when the process
+  exits.
+- POSIX: `cp --force` onto an existing remote directory honours
+  `dirs_exist_ok` (same semantics as the Windows `shutil` path).
+- `ensure_session()` is a no-op on POSIX (each `smbclient` call authenticates on
+  its own) instead of pretending to establish a session.
+
 ## [0.2.0] - 2026-10-26
 
 ### Fixed
