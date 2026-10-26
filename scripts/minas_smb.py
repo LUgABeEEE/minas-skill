@@ -307,7 +307,16 @@ def _auth_args(host: str, share: str = "") -> list[str]:
         return ["-A", _AUTH_FILE]
     fd, path = tempfile.mkstemp(prefix="minas-smb-", suffix=".auth")
     try:
-        os.fchmod(fd, 0o600)
+        # POSIX: fchmod keeps the window between create and chmod closed.
+        # Windows has no os.fchmod and no POSIX mode bits — chmod is a no-op
+        # there, and this backend is not used on Windows anyway.
+        try:
+            os.fchmod(fd, 0o600)
+        except (AttributeError, OSError):
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(f"username = {user}\n")
             f.write(f"password = {password}\n")

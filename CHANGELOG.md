@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The auth-file helper no longer assumes `os.fchmod` exists — it does not on
+  Windows, where the call raised `AttributeError`; the mode is now set through
+  `os.chmod` as a best-effort fallback.
+- `test_decode_prefers_cp936_for_chinese_windows` pins the preferred encoding,
+  so it no longer fails on runners whose console code page is not cp936
+  (the Windows CI leg was red on `main` for this reason).
 - POSIX: the SMB password never reaches a process command line — credentials go
   into a `0600` auth file passed as `smbclient -A`, removed when the process
   exits.

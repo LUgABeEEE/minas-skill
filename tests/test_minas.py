@@ -293,8 +293,39 @@ class TestPosixSmbBackend(unittest.TestCase):
         self.assertNotIn("TOPSECRET", " ".join(argv))
         self.assertIn("-A", argv)
         self.assertTrue(authfile)
-        self.assertEqual(oct(os.stat(authfile).st_mode & 0o777), "0o600")
+        if os.name != "nt":  # Windows has no POSIX mode bits
+            self.assertEqual(oct(os.stat(authfile).st_mode & 0o777), "0o600")
         os.unlink(authfile)
+
+    def test_auth_file_survives_missing_fchmod(self):
+        """Windows has no ``os.fchmod``; building the auth file must still work."""
+        import os as _os
+
+        seen = {}
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            if "-A" in argv:
+                seen["auth"] = argv[argv.index("-A") + 1]
+                seen["existed_at_call"] = _os.path.exists(seen["auth"])
+            return R()
+
+        with mock.patch.dict(os.environ, {"MINAS_USER": "u", "MINAS_PASS": "x"}), \
+                mock.patch.object(self.smb.subprocess, "run", fake_run), \
+                mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"), \
+                mock.patch.object(self.smb, "_AUTH_FILE", None), \
+                mock.patch.object(_os, "fchmod", side_effect=AttributeError("no fchmod"),
+                                  create=True):
+            self.smb.run("host", "share", "", ["ls"])
+
+        self.assertIn("-A", seen["argv"])
+        self.assertTrue(seen["existed_at_call"])
+        _os.unlink(seen["auth"])
 
     def test_anonymous_when_no_user(self):
         """没有任何可用凭据时必须匿名（-N）。
@@ -438,8 +469,12 @@ class TestDryRunSafety(unittest.TestCase):
 
 class TestNetDecoding(unittest.TestCase):
     def test_decode_prefers_cp936_for_chinese_windows(self):
+        # "net" speaks the console/OEM code page; on a Chinese Windows that is
+        # cp936. Pin it so the case stays meaningful on an English runner (where
+        # the preferred encoding is cp1252 and would silently mojibake the bytes).
         raw = "命令成功完成".encode("cp936")
-        self.assertEqual(minas._decode_net_bytes(raw), "命令成功完成")
+        with mock.patch.object(minas.locale, "getpreferredencoding", return_value="cp936"):
+            self.assertEqual(minas._decode_net_bytes(raw), "命令成功完成")
 
     def test_decode_utf8_when_preferred_is_utf8(self):
         raw = "hello 世界".encode("utf-8")
