@@ -41,6 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/missfor100/minas-skill/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/missfor100/minas-skill/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/missfor100/minas-skill/releases/tag/v0.1.0
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/LUgABeEEE/minas-skill/releases/tag/v0.1.0

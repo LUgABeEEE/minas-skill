@@ -15,7 +15,7 @@ Thanks for helping improve the Xiaomi Smart Storage (MINAS) Samba agent skill.
 ## Development setup
 
 ```powershell
-git clone https://github.com/missfor100/minas-skill.git
+git clone https://github.com/LUgABeEEE/minas-skill.git
 cd minas-skill
 python -m pytest tests/ -q
 # or
