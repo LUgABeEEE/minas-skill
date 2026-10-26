@@ -18,12 +18,20 @@ description: 小米智能存储（Xiaomi Smart Storage / MINAS）Samba/SMB 文�
 - Samba / SMB / 共享文件夹 / `\\主机\共享名`
 
 **不要**用于：刷机、开 SSH/root、Docker、固件破解（本技能只做文件层）。
+需要 `/pool0/data` 全池（含未发布为 Samba 共享的目录）请改用 skill `minas-webdav`。
 
 ## 前置条件
 
 1. NAS 与本机同一局域网
 2. 已在官方客户端里开启/看到 Samba 共享
-3. Windows 能访问 `\\<NAS>\<共享名>`（已有会话，或提供账号密码）
+3. **按平台**能连上共享：
+
+| 平台 | 连接方式 | 额外要求 |
+|---|---|---|
+| Windows | 系统原生 UNC（`net use` 建立会话） | 能访问 `\\<NAS>\<共享名>`，或提供账号密码 |
+| Linux / macOS | `smbclient` 子进程，**不挂载** | 安装 Samba 客户端：`apt install smbclient`（Debian/Ubuntu）／`brew install samba` |
+
+> POSIX 上每次调用都会起一个 `smbclient`，因此比 Windows 稍慢；`ls` 的目录元数据在单次进程内缓存，`du` 的逐层递归仍是一次调用一层。
 
 可选环境变量（**不要把密码写进对话或仓库**）：
 
@@ -62,7 +70,14 @@ python scripts/minas.py rm //.../work --recursive --dry-run   # 先预览，不�
 python scripts/minas.py rm //.../work --recursive
 ```
 
-路径也可用 Windows UNC：`\\NAS\share\file`。
+路径也可用 Windows UNC：`\\NAS\share\file`。两种写法（`//host/share/...` 与 `\\host\share\...`）在两个平台都接受。
+
+**换环境后先自检**（POSIX 后端解析 `smbclient` 文本输出，先确认能正确解析你的服务器）：
+
+```bash
+python scripts/minas.py selftest //<NAS_IP>/<共享名>          # 只读检查
+python scripts/minas.py selftest //<NAS_IP>/<共享名> --raw    # 附带原始 smbclient 输出
+```
 
 退出码：`0` 成功 · `1` 一般错误/参数问题 · `2` 路径不存在（主机可达） · `3` 权限、网络或主机/共享不可达。
 
@@ -79,22 +94,28 @@ python scripts/minas.py rm //.../work --recursive
 
 | 文件 | 作用 |
 |---|---|
-| `scripts/minas.py` | Samba CLI（Windows UNC / `net use`） |
+| `scripts/minas.py` | Samba CLI 主体（路径校验、命令、输出格式）——两平台共用 |
+| `scripts/minas_smb.py` | **POSIX 后端**：`SmbPath`（pathlib 风格门面）+ `shutil` 替代（`copy2`/`copytree`/`move`/`rmtree`/`disk_usage`），底层调 `smbclient` |
 | `tests/test_minas.py` | 离线单测（路径安全约束 / 退出码 / dry-run） |
 | `references/samba-surface.md` | 协议与共享探测结论 |
 | `references/examples.md` | 常见任务示例 |
 | `docs/USAGE.md` | 完整使用文档 |
 
-底层使用系统 SMB 客户端与 UNC 路径，不依赖第三方 SMB 库。
+**平台分派**：Windows 走系统 UNC（`net use` + `pathlib`/`shutil`）；Linux/macOS 走 `smbclient` 子进程。命令层代码两平台共用，差异集中在 `to_local()`、`ensure_session()`、`list_shares()` 与 `fs_*` 这几个分派点。
+
+不依赖任何第三方 Python SMB 库；POSIX 侧依赖系统 `smbclient` 可执行文件。
 
 ## 故障排查
 
 | 现象 | 处理 |
 |---|---|
 | 找不到共享 | `python scripts/minas.py shares --host <IP>`；到官方客户端确认共享已开启 |
-| 1219 多重凭据 | `net use * /delete /y` 后重连，只用一种账号 |
+| 1219 多重凭据 | （Windows）`net use * /delete /y` 后重连，只用一种账号 |
 | 59 / 拒绝访问 | 核对共享名（中文共享名需原样使用）与账号 |
 | 路径不存在 | 确认是 `//host/share/...` 而不是 `/pool0/...`（那是 WebDAV 路径） |
+| `smbclient not found`（Linux） | `apt install smbclient`；本技能不挂载、不需要 `cifs-utils` |
+| `cannot parse smbclient listing output`（Linux） | `selftest <路径> --raw` 看原始输出，把该输出反馈给维护者（说明服务器/版本的 `ls` 格式与预期不符） |
+| `df` 在 Linux 上报无可用空间 | SMB 侧容量来自 `smbclient du` 的 footer；若服务器不返回，改用 `minas-webdav df` 查存储池容量 |
 
 ## 安全边界
 

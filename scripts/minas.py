@@ -13,7 +13,16 @@
 # limitations under the License.
 """MINAS Samba toolkit — agent file ops on Xiaomi Smart Storage over SMB/CIFS.
 
-Primary transport is Samba (port 445). Works with UNC paths on Windows.
+Primary transport is Samba (port 445). Remote paths are UNC on both platforms
+(``//host/share/inner`` or ``\\\\host\\share\\inner``); how they are reached
+differs:
+
+* **Windows** — the OS resolves UNC paths natively; sessions are set up with
+  ``net use`` and file ops go through ``pathlib``/``shutil``.
+* **Linux / macOS** — there is no OS-level UNC, so the ``smbclient`` binary is
+  used instead (see ``minas_smb.py``). Requires Samba's client to be installed
+  (``apt install smbclient``). Nothing is mounted.
+
 No secrets in source: configure via environment variables.
 
 Environment:
@@ -39,8 +48,16 @@ Examples:
   python minas.py mv //NAS/share/a.txt //NAS/share/work/a.txt
   python minas.py rm //NAS/share/work --recursive
   python minas.py find //NAS/share --name "*.mp4" --max-depth 3
+  python minas.py selftest //NAS/share          # verify the SMB plumbing
 
 Exit codes: 0 ok, 1 usage/error, 2 not found, 3 auth/network.
+
+Platform notes (Linux):
+  * `df` reports the share's total/used/free from smbclient's `du` footer. For
+    the *pool* capacity of a MINAS device use `minas-webdav df` instead.
+  * `mv`/`cp` prefer server-side `rename`/`scopy` and fall back to a local
+    round trip when the server refuses; recursive copies walk the tree.
+  * Credentials never touch argv: they go into a 0600 temp file passed via -A.
 """
 from __future__ import annotations
 
@@ -58,6 +75,21 @@ from pathlib import Path
 from typing import Any
 
 IS_WINDOWS = os.name == "nt"
+
+# Ensure the sibling backend module is importable when this file is executed
+# directly (python scripts/minas.py) from any working directory.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+_SMB_MOD: Any = None
+
+
+def _smb() -> Any:
+    """Lazy import of the POSIX backend (it imports helpers from this module)."""
+    global _SMB_MOD
+    if _SMB_MOD is None:
+        import minas_smb  # noqa: WPS433 (deliberate lazy import)
+        _SMB_MOD = minas_smb
+    return _SMB_MOD
 
 
 # --------------- path helpers ---------------
@@ -116,7 +148,7 @@ def safe_remote(path: str) -> str:
     p = collapse_unc(path)
     if not p.startswith("\\\\"):
         raise ValueError(f"remote path must be UNC (\\\\host\\share\\...), got: {path}")
-    root = os.environ.get("MINAS_ROOT", "").strip()
+    root = setting("MINAS_ROOT").strip()
     if root:
         r = collapse_unc(root)
         if p.lower() != r.lower() and not p.lower().startswith(r.lower().rstrip("\\") + "\\"):
@@ -124,8 +156,51 @@ def safe_remote(path: str) -> str:
     return p
 
 
-def to_local(path: str) -> Path:
-    return Path(norm_unc(path))
+def to_local(path: str) -> Any:
+    """Return a path object with the ``pathlib.Path`` API used by this CLI.
+
+    Windows: a real ``pathlib.Path`` over the UNC path — the OS resolves it.
+    POSIX:   ``minas_smb.SmbPath``, which shells out to ``smbclient``.
+    """
+    if IS_WINDOWS:
+        return Path(norm_unc(path))
+    return _smb().SmbPath(norm_unc(path))
+
+
+# ---- shutil shims: same call sites work with local or remote endpoints -----
+
+def fs_copy2(src: Any, dst: Any) -> None:
+    if IS_WINDOWS:
+        shutil.copy2(str(src), str(dst))
+    else:
+        _smb().fs_copy2(src, dst)
+
+
+def fs_copytree(src: Any, dst: Any, dirs_exist_ok: bool = False) -> None:
+    if IS_WINDOWS:
+        shutil.copytree(str(src), str(dst), dirs_exist_ok=dirs_exist_ok)
+    else:
+        _smb().fs_copytree(src, dst, dirs_exist_ok=dirs_exist_ok)
+
+
+def fs_move(src: Any, dst: Any) -> None:
+    if IS_WINDOWS:
+        shutil.move(str(src), str(dst))
+    else:
+        _smb().fs_move(src, dst)
+
+
+def fs_rmtree(path: Any) -> None:
+    if IS_WINDOWS:
+        shutil.rmtree(str(path))
+    else:
+        _smb().fs_rmtree(path)
+
+
+def fs_disk_usage(path: Any) -> Any:
+    if IS_WINDOWS:
+        return shutil.disk_usage(str(path))
+    return _smb().fs_disk_usage(path)
 
 
 # Windows winerror 中表示「主机/共享层不可达」的码；与「可达但内部路径不存在」
@@ -150,12 +225,25 @@ def remote_exists(p: Path, display: str) -> bool:
 
 # --------------- SMB session helpers ---------------
 
+def setting(name: str, default: str = "") -> str:
+    """Resolve a MINAS_* setting: environment, then the shared credentials file.
+
+    Environment wins so explicit per-call overrides always take effect (and the
+    offline unit tests stay hermetic). On POSIX the backend goes one step
+    further and can reuse this host's existing cifs mount credentials.
+    """
+    value = os.environ.get(name)
+    if value:
+        return value
+    return _smb().setting(name, default)
+
+
 def smb_env() -> dict[str, str]:
     return {
-        "host": os.environ.get("MINAS_HOST", ""),
-        "share": os.environ.get("MINAS_SHARE", ""),
-        "user": os.environ.get("MINAS_USER", ""),
-        "password": os.environ.get("MINAS_PASS", ""),
+        "host": setting("MINAS_HOST"),
+        "share": setting("MINAS_SHARE"),
+        "user": setting("MINAS_USER"),
+        "password": setting("MINAS_PASS") or setting("MINAS_PASSWORD"),
     }
 
 
@@ -329,7 +417,14 @@ def _map_remote(target: str, user: str, password: str | None, interactive: bool)
 
 
 def ensure_session(host: str, share: str | None = None) -> None:
-    """Best-effort: connect IPC$/share with env credentials if provided."""
+    """Best-effort: connect IPC$/share with env credentials if provided.
+
+    POSIX has no persistent session to establish — ``smbclient`` authenticates
+    on every invocation (see ``minas_smb._auth_args``) — so this is a no-op
+    there and the CLI code can stay platform-agnostic.
+    """
+    if not IS_WINDOWS:
+        return
     env = smb_env()
     user = env["user"]
     if not user:
@@ -367,11 +462,16 @@ def ensure_session(host: str, share: str | None = None) -> None:
 
 
 def list_shares(host: str) -> tuple[int, list[str]]:
-    """List share names on host via net view (Windows).
+    """List share names on host.
+
+    Windows: ``net view`` (locale-dependent output, parsed leniently).
+    POSIX:   ``smbclient -L`` (see ``minas_smb.list_shares``).
 
     Returns (exit_code, names). A non-zero exit code means the query failed
     (network/auth/permission) — callers must NOT treat that as "no shares".
     """
+    if not IS_WINDOWS:
+        return _smb().list_shares(host)
     ensure_session(host, None)
     code, out, err = run_net(["view", f"\\\\{host}"])
     text = out + "\n" + err
@@ -431,9 +531,11 @@ def cmd_shares(_client: Any, args: argparse.Namespace) -> int:
     if code != 0:
         # 查询失败 ≠ 没有共享：必须以非 0 退出码暴露给 agent
         if code == 127:
-            print("net command not found (Windows only for shares)", file=sys.stderr)
+            print("net command not found (install Samba's smbclient on POSIX)",
+                  file=sys.stderr)
             return 1
-        print(f"net view failed for {host} (exit {code}); check network/credentials", file=sys.stderr)
+        print(f"share enumeration failed for {host} (exit {code}); "
+              f"check network/credentials", file=sys.stderr)
         return 3
     if args.json:
         print(json.dumps({"host": host, "shares": names}, ensure_ascii=False, indent=2))
@@ -573,7 +675,7 @@ def cmd_df(_client: Any, args: argparse.Namespace) -> int:
         print(f"not found: {path}", file=sys.stderr)
         return 2
     try:
-        usage = shutil.disk_usage(str(p if p.is_dir() else p.parent))
+        usage = fs_disk_usage(p if p.is_dir() else p.parent)
         info = {
             "path": str(p),
             "total_bytes": usage.total,
@@ -605,7 +707,7 @@ def cmd_get(_client: Any, args: argparse.Namespace) -> int:
     if local.is_dir():
         local = local / remote.name
     local.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(remote), str(local))
+    fs_copy2(remote, local)
     print(f"saved {local} ({fmt_size(local.stat().st_size)})")
     return 0
 
@@ -622,7 +724,7 @@ def cmd_put(_client: Any, args: argparse.Namespace) -> int:
     ensure_session(*parse_unc(remote_path)[:2])
     remote = to_local(remote_path)
     remote.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(local), str(remote))
+    fs_copy2(local, remote)
     print(f"uploaded {local} -> {remote} ({fmt_size(local.stat().st_size)})")
     return 0
 
@@ -662,7 +764,7 @@ def cmd_rm(_client: Any, args: argparse.Namespace) -> int:
         if args.dry_run:
             print(f"would remove dir: {remote}")
             return 0
-        shutil.rmtree(str(remote))
+        fs_rmtree(remote)
     else:
         if args.dry_run:
             print(f"would remove file: {remote}")
@@ -689,7 +791,7 @@ def cmd_mv(_client: Any, args: argparse.Namespace) -> int:
         print(f"would move {src} -> {dst}")
         return 0
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src), str(dst))
+    fs_move(src, dst)
     print(f"moved {src} -> {dst}")
     return 0
 
@@ -705,23 +807,18 @@ def cmd_cp(_client: Any, args: argparse.Namespace) -> int:
         print(f"not found: {args.src}", file=sys.stderr)
         return 2
     dst_exists = remote_exists(dst, args.dst)
-    if src.is_dir():
-        if dst_exists and not args.force:
-            print(f"destination exists (use --force): {dst}", file=sys.stderr)
-            return 1
-    else:
-        if dst_exists and not args.force:
-            print(f"destination exists (use --force): {dst}", file=sys.stderr)
-            return 1
+    if dst_exists and not args.force:
+        print(f"destination exists (use --force): {dst}", file=sys.stderr)
+        return 1
     if args.dry_run:
         print(f"would copy {src} -> {dst}")
         return 0
     if src.is_dir():
         # dirs_exist_ok so --force can overwrite an existing directory tree
-        shutil.copytree(str(src), str(dst), dirs_exist_ok=True)
+        fs_copytree(src, dst, dirs_exist_ok=True)
     else:
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(src), str(dst))
+        fs_copy2(src, dst)
     print(f"copied {src} -> {dst}")
     return 0
 
@@ -799,6 +896,50 @@ def cmd_tree(_client: Any, args: argparse.Namespace) -> int:
 
     print(root)
     rec(root, "", 0)
+    return 0
+
+
+def cmd_selftest(_client: Any, args: argparse.Namespace) -> int:
+    """Verify the SMB plumbing against a real share. Read-only unless --raw.
+
+    Exists because the POSIX backend parses ``smbclient`` text output; run this
+    once after configuring credentials to confirm listing/stat/disk usage work
+    against your own server before trusting the other commands.
+    """
+    path = safe_remote(args.path)
+    host, share, inner = parse_unc(path)
+    where = f"//{host}/{share}" + (f"/{inner}" if inner else "")
+    print(f"platform : {'windows' if IS_WINDOWS else 'posix'}")
+    if IS_WINDOWS:
+        print("backend  : net use + pathlib (OS resolves UNC)")
+    else:
+        m = _smb()
+        print(f"backend  : smbclient ({m.SMBCLIENT or 'NOT FOUND — install smbclient'})")
+        print(f"auth     : {m.auth_mode(host, share)}")
+    print(f"target   : {where}")
+    if not IS_WINDOWS and args.raw:
+        code, out = _smb().run(host, share, inner, ["ls"])
+        print(f"--- raw smbclient output (exit {code}) ---")
+        print(out.rstrip())
+        print("--- end raw ---")
+    p = to_local(path)
+    try:
+        st = p.stat()
+    except FileNotFoundError:
+        print("stat     : NOT FOUND")
+        return 2
+    print(f"stat     : is_dir={st.st_mode == 0o040000} size={st.st_size} mtime={int(st.st_mtime)}")
+    if p.is_dir():
+        kids = list(p.iterdir())
+        print(f"iterdir  : {len(kids)} entr{'y' if len(kids) == 1 else 'ies'}")
+        for k in kids[:5]:
+            print(f"           {k.name}")
+        try:
+            u = fs_disk_usage(p)
+            print(f"disk     : total={u.total} used={u.used} free={u.free}")
+        except OSError as e:
+            print(f"disk     : unavailable ({e})")
+    print("selftest : OK")
     return 0
 
 
@@ -883,6 +1024,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_find)
 
+    sp = sub.add_parser("selftest", help="verify the SMB plumbing against a real share")
+    sp.add_argument("path")
+    sp.add_argument("--raw", action="store_true", help="dump raw smbclient output (posix)")
+    sp.set_defaults(func=cmd_selftest)
+
     return p
 
 
@@ -898,6 +1044,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"permission denied: {e}", file=sys.stderr)
         return 3
     except OSError as e:
+        # minas_smb.SmbError carries the CLI exit code (2 = not found, 3 = auth/net)
+        ec = getattr(e, "exit_code", None)
+        if ec is not None:
+            print(str(e), file=sys.stderr)
+            return int(ec)
         print(f"os error: {e}", file=sys.stderr)
         return 3
     except KeyboardInterrupt:

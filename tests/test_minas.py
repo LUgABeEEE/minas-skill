@@ -195,7 +195,11 @@ class TestExitCodes(unittest.TestCase):
             self.assertEqual(minas.main(["shares"]), 1)
 
     def test_shares_failure_returns_3(self):
-        with mock.patch.object(minas, "ensure_session"), mock.patch.object(
+        # Pin the Windows backend: these two cases cover the `net view` parsing
+        # path, which must stay tested even when the suite runs on POSIX.
+        with mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.object(
+            minas, "ensure_session"
+        ), mock.patch.object(
             minas, "run_net", return_value=(2, "", "System error 53")
         ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}):
             self.assertEqual(minas.main(["shares"]), 3)
@@ -209,13 +213,205 @@ class TestExitCodes(unittest.TestCase):
             "The command completed successfully.\n"
         )
         buf = io.StringIO()
-        with mock.patch.object(minas, "ensure_session"), mock.patch.object(
+        with mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.object(
+            minas, "ensure_session"
+        ), mock.patch.object(
             minas, "run_net", return_value=(0, sample, "")
         ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}), redirect_stdout(buf):
             rc = minas.main(["shares", "--json"])
         self.assertEqual(rc, 0)
         data = json.loads(buf.getvalue())
         self.assertEqual(data["shares"], ["public", "data-home"])
+
+
+class TestPosixSmbBackend(unittest.TestCase):
+    """POSIX 后端：smbclient 输出解析与凭据处理（全部离线，不联网）。"""
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        import minas_smb  # noqa: WPS433
+
+        self.smb = minas_smb
+        self.addCleanup(self.smb._ENTRY_CACHE.clear)
+
+    LISTING = (
+        "Anonymous login successful\n"
+        "  .                                   D        0  Sat Oct 11 14:00:00 2026\n"
+        "  ..                                  D        0  Sat Oct 11 14:00:00 2026\n"
+        "  hello world.txt                     A     1234  Sat Oct 11 14:00:00 2026\n"
+        "  subdir                              D        0  Sat Oct 11 14:00:00 2026\n"
+        "  中文目录名                          D        0  Sat Oct 11 14:00:00 2026\n"
+        "\n\t\t12345 blocks of size 1024. 6789 blocks available\n"
+    )
+
+    def test_parse_listing_shapes(self):
+        got = self.smb.parse_listing(self.LISTING)
+        names = [e["name"] for e in got]
+        self.assertEqual(names, ["hello world.txt", "subdir", "中文目录名"])
+        self.assertEqual(got[0]["size"], 1234)
+        self.assertFalse(got[0]["is_dir"])
+        self.assertTrue(got[1]["is_dir"])
+
+    def test_parse_listing_rejects_garbage_loudly(self):
+        """无法解析时必须报错，绝不静默返回错误元数据。"""
+        with self.assertRaises(self.smb.SmbError):
+            self.smb.parse_listing("  ??? nothing like a listing ???\n")
+
+    def test_parse_free_space(self):
+        total, used, free = self.smb.parse_free_space(self.LISTING)
+        self.assertEqual(total, (12345 + 6789) * 1024)
+        self.assertEqual(used, 12345 * 1024)
+        self.assertEqual(free, 6789 * 1024)
+
+    def test_classify_exit_codes(self):
+        self.assertEqual(self.smb.classify("session setup failed: NT_STATUS_LOGON_FAILURE"), 3)
+        self.assertEqual(self.smb.classify("tree connect failed: NT_STATUS_BAD_NETWORK_NAME"), 2)
+        self.assertEqual(self.smb.classify("NT_STATUS_OBJECT_NAME_NOT_FOUND"), 2)
+        self.assertEqual(self.smb.classify("something else"), 1)
+
+    def test_password_never_reaches_argv(self):
+        """凭据必须走 0600 的 -A 文件，不能出现在命令行。"""
+        seen = {}
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            seen["authfile"] = argv[argv.index("-A") + 1] if "-A" in argv else None
+            return R()
+
+        with mock.patch.dict(
+            os.environ, {"MINAS_USER": "u", "MINAS_PASS": "TOPSECRET"}, clear=False
+        ), mock.patch.object(self.smb.subprocess, "run", fake_run), mock.patch.object(
+            self.smb, "SMBCLIENT", "/usr/bin/smbclient"
+        ), mock.patch.object(self.smb, "_AUTH_FILE", None):
+            self.smb.run("host", "share", "", ["ls"])
+        argv, authfile = seen["argv"], seen["authfile"]
+        self.assertNotIn("TOPSECRET", " ".join(argv))
+        self.assertIn("-A", argv)
+        self.assertTrue(authfile)
+        if os.name != "nt":  # Windows has no POSIX mode bits
+            self.assertEqual(oct(os.stat(authfile).st_mode & 0o777), "0o600")
+        os.unlink(authfile)
+
+    def test_auth_file_survives_missing_fchmod(self):
+        """Windows has no ``os.fchmod``; building the auth file must still work."""
+        import os as _os
+
+        seen = {}
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            if "-A" in argv:
+                seen["auth"] = argv[argv.index("-A") + 1]
+                seen["existed_at_call"] = _os.path.exists(seen["auth"])
+            return R()
+
+        with mock.patch.dict(os.environ, {"MINAS_USER": "u", "MINAS_PASS": "x"}), \
+                mock.patch.object(self.smb.subprocess, "run", fake_run), \
+                mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"), \
+                mock.patch.object(self.smb, "_AUTH_FILE", None), \
+                mock.patch.object(_os, "fchmod", side_effect=AttributeError("no fchmod"),
+                                  create=True):
+            self.smb.run("host", "share", "", ["ls"])
+
+        self.assertIn("-A", seen["argv"])
+        self.assertTrue(seen["existed_at_call"])
+        _os.unlink(seen["auth"])
+
+    def test_anonymous_when_no_user(self):
+        """没有任何可用凭据时必须匿名（-N）。
+
+        显式隔离三类凭据来源，否则会读到本机真实的 credentials.env 而不再绝缘。
+        """
+        seen = {}
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            return R()
+
+        env = {k: v for k, v in os.environ.items() if k != "MINAS_USER"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+            self.smb.subprocess, "run", fake_run
+        ), mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"), mock.patch.object(
+            self.smb, "_cred_file_env", lambda: {}
+        ), mock.patch.object(
+            self.smb, "_fstab_credentials", lambda *a, **k: ("", "")
+        ):
+            self.smb.run("host", "share", "", ["ls"])
+        argv = seen["argv"]
+        self.assertIn("-N", argv)
+        self.assertNotIn("-A", argv)
+
+    def test_share_mount_credentials_beat_generic_file(self):
+        """本机按共享挂载的凭据优先于通用凭据文件。
+
+        本机 credentials.env 放的是 WebDAV 那套账号，而每个 SMB 共享各有自己的
+        挂载账号；通用文件若抢先命中，SMB 就会拿错账号 → LOGON_FAILURE。
+        """
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
+        with mock.patch.dict(os.environ, clean, clear=True), mock.patch.object(
+            self.smb, "_cred_file_env",
+            lambda: {"MINAS_USER": "webdav-user", "MINAS_PASS": "webdav-pass"},
+        ), mock.patch.object(
+            self.smb, "_fstab_credentials", lambda host, share: ("smb-user", "smb-pass")
+        ):
+            self.assertEqual(self.smb._password("nas", "share"), ("smb-user", "smb-pass"))
+
+    def test_generic_file_used_when_share_not_mounted(self):
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
+        with mock.patch.dict(os.environ, clean, clear=True), mock.patch.object(
+            self.smb, "_cred_file_env", lambda: {"MINAS_USER": "u", "MINAS_PASS": "p"}
+        ), mock.patch.object(
+            self.smb, "_fstab_credentials", lambda host, share: ("", "")
+        ):
+            self.assertEqual(self.smb._password("nas", "share"), ("u", "p"))
+
+    def test_environment_beats_mount_and_file(self):
+        with mock.patch.dict(
+            os.environ, {"MINAS_USER": "env-u", "MINAS_PASS": "env-p"}, clear=False
+        ), mock.patch.object(
+            self.smb, "_cred_file_env",
+            lambda: {"MINAS_USER": "file-u", "MINAS_PASS": "file-p"},
+        ), mock.patch.object(
+            self.smb, "_fstab_credentials", lambda host, share: ("mnt-u", "mnt-p")
+        ):
+            self.assertEqual(self.smb._password("nas", "share"), ("env-u", "env-p"))
+
+    def test_list_shares_parsing_skips_trailing_note(self):
+        """共享行是缩进的；尾部提示（如 SMB1 disabled…）不能被当成共享名。"""
+        sample = (
+            "Anonymous login successful\n\n"
+            "\tSharename       Type      Comment\n"
+            "\t---------       ----      -------\n"
+            "\tIPC$            IPC       IPC Service (MINAS)\n"
+            "\tbackup          Disk      Z drive\n"
+            "SMB1 disabled -- no workgroup available\n"
+        )
+
+        class R:
+            returncode = 0
+            stdout = sample
+            stderr = ""
+
+        with mock.patch.object(self.smb.subprocess, "run", lambda *a, **k: R()), \
+                mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"):
+            code, names = self.smb.list_shares("nas")
+        self.assertEqual(code, 0)
+        self.assertEqual(names, ["IPC$", "backup"])
 
 
 class TestDryRunSafety(unittest.TestCase):
@@ -273,8 +469,12 @@ class TestDryRunSafety(unittest.TestCase):
 
 class TestNetDecoding(unittest.TestCase):
     def test_decode_prefers_cp936_for_chinese_windows(self):
+        # "net" speaks the console/OEM code page; on a Chinese Windows that is
+        # cp936. Pin it so the case stays meaningful on an English runner (where
+        # the preferred encoding is cp1252 and would silently mojibake the bytes).
         raw = "命令成功完成".encode("cp936")
-        self.assertEqual(minas._decode_net_bytes(raw), "命令成功完成")
+        with mock.patch.object(minas.locale, "getpreferredencoding", return_value="cp936"):
+            self.assertEqual(minas._decode_net_bytes(raw), "命令成功完成")
 
     def test_decode_utf8_when_preferred_is_utf8(self):
         raw = "hello 世界".encode("utf-8")
@@ -382,7 +582,9 @@ class TestSharesChineseNoise(unittest.TestCase):
         )
         with mock.patch.object(minas, "ensure_session"), mock.patch.object(
             minas, "run_net", return_value=(0, sample, "")
-        ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}):
+        ), mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.dict(
+            os.environ, {"MINAS_HOST": "nas"}
+        ):
             code, names = minas.list_shares("nas")
         self.assertEqual(code, 0)
         self.assertEqual(names, ["public"])

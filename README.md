@@ -256,7 +256,7 @@ python -m unittest discover -s tests -v
 ## 10. 反馈与限制
 
 - 当前以 **Windows SMB 客户端** 为主路径  
-- Linux/macOS 可改用 `smbclient` / `mount.cifs`（文档未展开）  
+- Linux/macOS：仓库自带 POSIX 后端（`scripts/minas_smb.py`，走 `smbclient`，凭据经 `-A` 0600 临时文件传入，命令与 Windows 完全一致）；日常也可以在 `/etc/fstab` 里 `mount.cifs` 挂盘后直接走挂载路径  
 - 共享范围以小米智能存储里实际开启的 Samba 共享为准  
 - Bug / 需求请用 [Issue 模板](.github/ISSUE_TEMPLATE)；安全问题见 [SECURITY.md](SECURITY.md)
 - 贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)；社区行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
