@@ -6,7 +6,7 @@
 
 1. 在官方客户端开启 Samba 共享  
 2. 配置 `MINAS_HOST`，并**强烈建议**设置 `MINAS_ROOT`（把所有操作锁在该 UNC 前缀内）；  
-   凭据按 `MINAS_PASSWORD_FILE`（推荐）→ `MINAS_PASS`（不推荐）的顺序提供  
+   凭据按 `MINAS_PASSWORD_FILE`（推荐，优先于交互提示）→ 交互 `*` → `MINAS_PASS`（不推荐）的顺序提供  
 3. 运行：
 
 ```powershell

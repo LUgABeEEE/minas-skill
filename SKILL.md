@@ -32,8 +32,8 @@ MINAS_HOST           NAS 的 IP 或主机名
 MINAS_SHARE          默认共享名
 MINAS_USER           SMB 用户名
 MINAS_ROOT           限制所有远端操作只能落在该 UNC 前缀之下（强烈建议设置）
-MINAS_PASSWORD_FILE  密码文件路径（非交互/agent 场景推荐）
-MINAS_PASS           SMB 密码（最后兼容，会打印安全警告，优先用上面两种）
+MINAS_PASSWORD_FILE  密码文件路径（推荐；设置后优先于交互提示）
+MINAS_PASS           SMB 密码（最后兼容，会打印安全警告，优先用密码文件）
 ```
 
 ## 快速用法

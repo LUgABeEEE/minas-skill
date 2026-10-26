@@ -271,5 +271,122 @@ class TestDryRunSafety(unittest.TestCase):
         self.assertTrue(dst.exists())
 
 
+class TestNetDecoding(unittest.TestCase):
+    def test_decode_prefers_cp936_for_chinese_windows(self):
+        raw = "命令成功完成".encode("cp936")
+        self.assertEqual(minas._decode_net_bytes(raw), "命令成功完成")
+
+    def test_decode_utf8_when_preferred_is_utf8(self):
+        raw = "hello 世界".encode("utf-8")
+        with mock.patch.object(minas.locale, "getpreferredencoding", return_value="utf-8"):
+            self.assertEqual(minas._decode_net_bytes(raw), "hello 世界")
+
+    def test_decode_empty(self):
+        self.assertEqual(minas._decode_net_bytes(b""), "")
+
+
+class TestResolvePassword(unittest.TestCase):
+    def test_password_file_wins_over_interactive(self):
+        pw_file = Path(tempfile.mkdtemp()) / "pw.txt"
+        self.addCleanup(shutil.rmtree, pw_file.parent, True)
+        pw_file.write_text("secret-from-file\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"MINAS_PASSWORD_FILE": str(pw_file)}), mock.patch.object(
+            sys, "stdin", mock.Mock(isatty=lambda: True)
+        ), mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)):
+            self.assertEqual(minas.resolve_password(), "secret-from-file")
+
+    def test_interactive_star_when_no_file(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+            sys, "stdin", mock.Mock(isatty=lambda: True)
+        ), mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)), mock.patch.object(
+            minas, "IS_WINDOWS", True
+        ):
+            self.assertEqual(minas.resolve_password(), "*")
+
+
+class TestMapRemoteNoPasswordInArgv(unittest.TestCase):
+    def test_password_not_in_net_argv(self):
+        seen: list[list[str]] = []
+
+        def fake_run_net(args, timeout=30, capture=True):
+            seen.append(list(args))
+            return 0, "", ""
+
+        def fake_wnet(target, user, password):
+            return 0, ""
+
+        with mock.patch.object(minas, "run_net", side_effect=fake_run_net), mock.patch.object(
+            minas, "_wnet_add", side_effect=fake_wnet
+        ), mock.patch.object(minas, "IS_WINDOWS", True):
+            code, out, err = minas._map_remote("\\\\nas\\share", "u", "p@ss", False)
+        self.assertEqual(code, 0)
+        for args in seen:
+            self.assertNotIn("p@ss", args)
+
+    def test_interactive_uses_star_prompt(self):
+        seen: list[list[str]] = []
+
+        def fake_run_net(args, timeout=30, capture=True):
+            seen.append(list(args))
+            return 0, "", ""
+
+        with mock.patch.object(minas, "run_net", side_effect=fake_run_net), mock.patch.object(
+            minas, "IS_WINDOWS", True
+        ):
+            code, _, _ = minas._map_remote("\\\\nas\\share", "u", "*", True)
+        self.assertEqual(code, 0)
+        self.assertTrue(seen and seen[0][-1] == "*")
+
+
+class TestCpForceAndDryRun(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.patches = [
+            mock.patch.object(minas, "safe_remote", side_effect=lambda p: p),
+            mock.patch.object(minas, "to_local", side_effect=lambda p: Path(p)),
+            mock.patch.object(minas, "parse_unc", return_value=("h", "s", "")),
+            mock.patch.dict(os.environ, {"MINAS_USER": ""}),
+        ]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_cp_force_overwrites_existing_dir(self):
+        src = Path(self.tmp) / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("new", encoding="utf-8")
+        dst = Path(self.tmp) / "dst"
+        dst.mkdir()
+        (dst / "a.txt").write_text("old", encoding="utf-8")
+        self.assertEqual(minas.main(["cp", str(src), str(dst), "--force"]), 0)
+        self.assertEqual((dst / "a.txt").read_text(encoding="utf-8"), "new")
+
+    def test_cp_dry_run_changes_nothing(self):
+        src = Path(self.tmp) / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("new", encoding="utf-8")
+        dst = Path(self.tmp) / "dst"
+        self.assertEqual(minas.main(["cp", str(src), str(dst), "--dry-run"]), 0)
+        self.assertFalse(dst.exists())
+
+
+class TestSharesChineseNoise(unittest.TestCase):
+    def test_chinese_banner_words_filtered(self):
+        sample = (
+            "共享名     类型     用于    注释\r\n"
+            "--------------------------------------\r\n"
+            "public     Disk\r\n"
+            "命令成功完成。\r\n"
+        )
+        with mock.patch.object(minas, "ensure_session"), mock.patch.object(
+            minas, "run_net", return_value=(0, sample, "")
+        ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}):
+            code, names = minas.list_shares("nas")
+        self.assertEqual(code, 0)
+        self.assertEqual(names, ["public"])
+
+
 if __name__ == "__main__":
     unittest.main()

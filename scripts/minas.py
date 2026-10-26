@@ -20,7 +20,8 @@ Environment:
   MINAS_HOST     NAS hostname or IP (e.g. 192.168.1.50 or minas.local)
   MINAS_SHARE    Share name to use as default root (optional)
   MINAS_USER     SMB username (optional if Windows already has a session)
-  MINAS_PASSWORD_FILE  File holding the SMB password (preferred non-interactive way)
+  MINAS_PASSWORD_FILE  File holding the SMB password (preferred; wins even in
+                 interactive terminals; password never goes on a process argv)
   MINAS_PASS     SMB password env fallback (last resort; a security warning is printed;
                  prefer MINAS_PASSWORD_FILE or the interactive prompt)
   MINAS_ROOT     Restrict every remote file op to this UNC prefix. Unset = any UNC path.
@@ -46,6 +47,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import locale
 import os
 import re
 import shutil
@@ -157,6 +159,29 @@ def smb_env() -> dict[str, str]:
     }
 
 
+def _decode_net_bytes(data: bytes) -> str:
+    """Decode `net` output. net.exe speaks the ANSI/OEM code page (cp936 on
+    Chinese Windows), not UTF-8 — try the preferred encoding first."""
+    if not data:
+        return ""
+    candidates = []
+    pref = locale.getpreferredencoding(False)
+    if pref:
+        candidates.append(pref)
+    candidates.extend(["cp936", "gbk", "utf-8"])
+    seen: set[str] = set()
+    for enc in candidates:
+        key = enc.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", "replace")
+
+
 def run_net(args: list[str], timeout: int = 30, capture: bool = True) -> tuple[int, str, str]:
     exe = shutil.which("net") or shutil.which("net.exe") or "net"
     try:
@@ -167,12 +192,9 @@ def run_net(args: list[str], timeout: int = 30, capture: bool = True) -> tuple[i
         p = subprocess.run(
             [exe, *args],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
         )
-        return p.returncode, p.stdout or "", p.stderr or ""
+        return p.returncode, _decode_net_bytes(p.stdout or b""), _decode_net_bytes(p.stderr or b"")
     except FileNotFoundError:
         return 127, "", "net command not found (use Windows or install Samba client)"
     except Exception as e:
@@ -182,14 +204,11 @@ def run_net(args: list[str], timeout: int = 30, capture: bool = True) -> tuple[i
 def resolve_password() -> str | None:
     """按优先级解析 SMB 密码，避免明文进入命令行。
 
-    1. 可交互控制台 → 返回 "*"，交给 net use 的交互式密码提示（密码不进命令行）；
-    2. MINAS_PASSWORD_FILE → 从文件读取，读取后提示收紧文件权限；
+    1. MINAS_PASSWORD_FILE → 显式配置的密码文件（交互与 agent 场景都优先）；
+    2. 可交互控制台且未配密码文件 → 返回 "*"，交给 net use 的交互式密码提示；
     3. MINAS_PASSWORD / MINAS_PASS → 最后兼容，打印安全警告。
     """
-    # 1) 可交互控制台：优先交互提示
-    if IS_WINDOWS and sys.stdin.isatty() and sys.stdout.isatty():
-        return "*"
-    # 2) 密码文件（非交互场景，如 agent/计划任务）
+    # 1) 密码文件（显式配置优先，agent/计划任务也走这里）
     pw_file = os.environ.get("MINAS_PASSWORD_FILE", "").strip()
     if pw_file:
         try:
@@ -203,6 +222,9 @@ def resolve_password() -> str | None:
             file=sys.stderr,
         )
         return pw
+    # 2) 可交互控制台：交互提示（密码不进命令行）
+    if IS_WINDOWS and sys.stdin.isatty() and sys.stdout.isatty():
+        return "*"
     # 3) 环境变量（最后兼容，有泄露风险）
     pw = os.environ.get("MINAS_PASSWORD") or os.environ.get("MINAS_PASS") or ""
     if pw:
@@ -220,6 +242,92 @@ def resolve_password() -> str | None:
 _sessions: set[str] = set()
 
 
+def _wnet_add(target: str, user: str, password: str) -> tuple[int, str]:
+    """Map a remote share via Win32 WNetAddConnection2W.
+
+    Password is passed as an API argument (not a process command line), so it
+    does not show up in `Get-Process` / Task Manager the way `net use ... pass` does.
+    Returns (code, message). code 0 == success.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class NETRESOURCE(ctypes.Structure):
+        _fields_ = [
+            ("dwScope", wintypes.DWORD),
+            ("dwType", wintypes.DWORD),
+            ("dwDisplayType", wintypes.DWORD),
+            ("dwUsage", wintypes.DWORD),
+            ("lpLocalName", wintypes.LPWSTR),
+            ("lpRemoteName", wintypes.LPWSTR),
+            ("lpComment", wintypes.LPWSTR),
+            ("lpProvider", wintypes.LPWSTR),
+        ]
+
+    mpr = ctypes.WinDLL("mpr", use_last_error=True)
+    add = mpr.WNetAddConnection2W
+    add.argtypes = [ctypes.POINTER(NETRESOURCE), wintypes.LPWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    add.restype = wintypes.DWORD
+    nr = NETRESOURCE()
+    nr.dwType = 1  # RESOURCETYPE_DISK
+    nr.lpLocalName = None
+    nr.lpRemoteName = target
+    code = add(ctypes.byref(nr), password or None, user or None, 0)
+    if code == 0:
+        return 0, ""
+    return code, f"WNetAddConnection2W failed for {target}: error {code}"
+
+
+def _map_remote(target: str, user: str, password: str | None, interactive: bool) -> tuple[int, str, str]:
+    """Create an SMB session without putting the password on a process command line.
+
+    interactive and password == "*" keeps the classic `net use ... *` prompt.
+    A real password goes through WNetAddConnection2W (or PowerShell fallback).
+    """
+    if interactive or password == "*":
+        args = ["use", target, f"/user:{user}", "*"]
+        return run_net(args, capture=False)
+    if not password:
+        args = ["use", target, f"/user:{user}"]
+        return run_net(args, capture=True)
+    if IS_WINDOWS:
+        code, msg = _wnet_add(target, user, password)
+        if code == 0:
+            return 0, "", ""
+        # PowerShell fallback (still avoids `net use` argv); password via env, not cmdline.
+        ps = (
+            "$ErrorActionPreference='Stop';"
+            "$sec=ConvertTo-SecureString $env:MINAS_MAP_PASS -AsPlainText -Force;"
+            "New-SmbMapping -RemotePath $env:MINAS_MAP_TARGET "
+            "-UserName $env:MINAS_MAP_USER -Password $sec -Persistent:$false "
+            "| Out-Null"
+        )
+        env = os.environ.copy()
+        env["MINAS_MAP_PASS"] = password
+        env["MINAS_MAP_TARGET"] = target
+        env["MINAS_MAP_USER"] = user
+        try:
+            p = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True,
+                timeout=30,
+                env=env,
+            )
+            if p.returncode == 0:
+                return 0, "", ""
+            err = _decode_net_bytes(p.stderr or b"") or _decode_net_bytes(p.stdout or b"") or msg
+            return p.returncode, "", err
+        except Exception as e:
+            return 1, "", f"{type(e).__name__}: {e} ({msg})"
+    # Non-Windows: last resort (password would be visible in process list)
+    print(
+        "security warning: password passed on the command line "
+        "(no WNetAddConnection2 available on this platform)",
+        file=sys.stderr,
+    )
+    return run_net(["use", target, f"/user:{user}", password], capture=True)
+
+
 def ensure_session(host: str, share: str | None = None) -> None:
     """Best-effort: connect IPC$/share with env credentials if provided."""
     env = smb_env()
@@ -232,23 +340,28 @@ def ensure_session(host: str, share: str | None = None) -> None:
     password = resolve_password()
     interactive = password == "*"
     target = f"\\\\{host}\\{share}" if share else f"\\\\{host}\\IPC$"
-    # disconnect first to avoid 1219 (multiple credentials)
-    run_net(["use", target, "/delete", "/y"])
-    args = ["use", target, f"/user:{user}"]
-    if password:
-        # "*" 时 net 交互式提示，密码不进命令行
-        args.append(password)
-    code, out, err = run_net(args, capture=not interactive)
+
+    code, out, err = _map_remote(target, user, password, interactive)
     if code == 0:
         _sessions.add(key)
         return
+
+    # 1219 = ERROR_SESSION_CREDENTIAL_CONFLICT: only then drop the old mapping.
+    conflict = code == 1219 or "1219" in (err or "")
+    if conflict:
+        run_net(["use", target, "/delete", "/y"])
+        code, out, err = _map_remote(target, user, password, interactive)
+        if code == 0:
+            _sessions.add(key)
+            return
+
     if share:
         # try IPC$ only
-        run_net(["use", f"\\\\{host}\\IPC$", "/delete", "/y"])
-        args = ["use", f"\\\\{host}\\IPC$", f"/user:{user}"]
-        if password:
-            args.append(password)
-        code2, _, _ = run_net(args, capture=not interactive)
+        ipc = f"\\\\{host}\\IPC$"
+        code2, _, err2 = _map_remote(ipc, user, password, interactive)
+        if code2 != 0 and (code2 == 1219 or "1219" in (err2 or "")):
+            run_net(["use", ipc, "/delete", "/y"])
+            code2, _, _ = _map_remote(ipc, user, password, interactive)
         if code2 == 0:
             _sessions.add(key)
 
@@ -268,13 +381,18 @@ def list_shares(host: str) -> tuple[int, list[str]]:
         # Prefer lines after the dashed separator.
         lines = text.splitlines()
         seen_sep = False
+        status_re = re.compile(
+            r"(命令成功完成|The command completed|successfully\.?$|"
+            r"什么都没有列出|There are no entries|列出 .* 的共享)",
+            re.I,
+        )
         for line in lines:
             if re.match(r"^-{3,}", line.strip()):
                 seen_sep = True
                 continue
             if not seen_sep:
                 continue
-            if not line.strip():
+            if not line.strip() or status_re.search(line):
                 continue
             # columns: Share name  Type  Used as  Comment
             m = re.match(r"^(\S+(?:\s\S+)*?)\s{2,}(\S+)\s{2,}(.*?)$", line)
@@ -285,11 +403,19 @@ def list_shares(host: str) -> tuple[int, list[str]]:
             toks = line.split()
             if toks:
                 names.append(toks[0])
-        # unique preserve order
+        # unique preserve order; drop locale header noise tokens
+        noise = {
+            "the", "command", "completed", "successfully", "there",
+            "命令", "成功", "完成", "的", "共享名", "资源", "注释",
+            "什么", "都不", "是", "有", "列出", "主机",
+        }
         out_names = []
         for n in names:
-            if n and n not in out_names and n.lower() not in {"the", "command", "completed", "successfully", "there"}:
-                out_names.append(n)
+            if not n or n in out_names:
+                continue
+            if n.lower() in noise:
+                continue
+            out_names.append(n)
         names = out_names
     return code, names
 
@@ -583,12 +709,18 @@ def cmd_cp(_client: Any, args: argparse.Namespace) -> int:
         if dst_exists and not args.force:
             print(f"destination exists (use --force): {dst}", file=sys.stderr)
             return 1
-        shutil.copytree(str(src), str(dst))
     else:
-        dst.parent.mkdir(parents=True, exist_ok=True)
         if dst_exists and not args.force:
             print(f"destination exists (use --force): {dst}", file=sys.stderr)
             return 1
+    if args.dry_run:
+        print(f"would copy {src} -> {dst}")
+        return 0
+    if src.is_dir():
+        # dirs_exist_ok so --force can overwrite an existing directory tree
+        shutil.copytree(str(src), str(dst), dirs_exist_ok=True)
+    else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(src), str(dst))
     print(f"copied {src} -> {dst}")
     return 0
@@ -739,6 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("src")
     sp.add_argument("dst")
     sp.add_argument("-f", "--force", action="store_true")
+    sp.add_argument("--dry-run", action="store_true", help="print the planned copy, change nothing")
     sp.set_defaults(func=cmd_cp)
 
     sp = sub.add_parser("find", help="find by name pattern")
