@@ -50,9 +50,7 @@ $env:MINAS_USER = "<SMB 用户名>"
 
 **密码三选一（按优先级）**：
 
-1. **交互提示（推荐）**：在可交互终端运行时，`net use` 会以 `*` 方式提示输入，
-   密码不进命令行、不进环境变量；
-2. **密码文件（非交互/agent 场景）**：
+1. **密码文件（推荐，交互与 agent 都适用）**：
 
    ```powershell
    Set-Content -Path .\minas_pw.txt -Value "<SMB 密码>" -NoNewline
@@ -61,8 +59,14 @@ $env:MINAS_USER = "<SMB 用户名>"
    $env:MINAS_PASSWORD_FILE = ".\minas_pw.txt"
    ```
 
+   设置后即使在可交互终端也会走文件；密码经 Win32 `WNetAddConnection2W`
+   传入，**不进进程命令行**。
+
+2. **交互提示（未设密码文件时）**：在可交互终端运行时以 `*` 方式提示输入，
+   密码不进命令行、不进环境变量；
+
 3. **环境变量（最后兼容，不推荐）**：`$env:MINAS_PASS = "<SMB 密码>"` —— 脚本会打印
-   安全警告（环境变量可能被子进程/转储读到）。
+   安全警告（环境变量可能被子进程/转储读到）；同样不经过 `net use` 的 argv。
 
 也可以只用当前 Windows 已认证的 SMB 会话（资源管理器能打开共享即可）。
 
@@ -254,10 +258,13 @@ python -m unittest discover -s tests -v
 - 当前以 **Windows SMB 客户端** 为主路径  
 - Linux/macOS 可改用 `smbclient` / `mount.cifs`（文档未展开）  
 - 共享范围以小米智能存储里实际开启的 Samba 共享为准  
+- Bug / 需求请用 [Issue 模板](.github/ISSUE_TEMPLATE)；安全问题见 [SECURITY.md](SECURITY.md)
+- 贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)；社区行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 版本记录见 [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## 11. 开源许可
+## 11. 开源许可与声明
 
 本项目基于 [Apache License 2.0](LICENSE) 开源，版权声明与商标说明见 [NOTICE](NOTICE)。
 
@@ -265,5 +272,12 @@ python -m unittest discover -s tests -v
 Copyright 2026 missfor100
 SPDX-License-Identifier: Apache-2.0
 ```
+
+**声明**
+
+- 本项目是面向小米智能存储（MINAS）的**第三方**文件操作工具，**不是**小米官方产品，与 Xiaomi 无隶属、赞助或背书关系。
+- Xiaomi、小米智能存储及相关商标归其各自权利人所有；此处仅用于指明兼容目标设备。
+- 软件按“现状”提供，不附带任何明示或默示担保；使用本工具访问你自己的 NAS 的风险自负。请遵守设备所在地法律法规与厂商服务条款。
+- 请勿将本工具用于未授权访问他人存储设备。
 
 祝整理愉快。
