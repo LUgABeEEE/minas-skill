@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-01
+
+### Added
+
+- `pyproject.toml`: ruff + pytest configuration for the repository (line length
+  120, rules `E,F,W,I,B`). Deliberately no `[project]`/`[build-system]` — this
+  is an agent skill run in place, not a distributable package.
+- CI: a `ruff` job, Python 3.13 in the test matrix, and a new CodeQL workflow
+  (push, PR, weekly).
+- `SECURITY.md`: supported-version table brought up to date (0.2.x → 0.3.x).
+
+### Fixed
+
+- `scripts/minas_smb.py`: the `smbclient` failure paths now chain their cause
+  (`raise ... from exc`), so a timeout/FileNotFoundError is distinguishable from
+  an error inside the handler.
+- `.github/workflows/gitleaks.yml`: missing trailing newline.
+- `README.md`: project tree lists the new `pyproject.toml` and the CodeQL job.
+
 ## [0.3.0] - 2026-10-31
 
 ### Added
@@ -84,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LUgABeEEE/minas-skill/releases/tag/v0.1.0

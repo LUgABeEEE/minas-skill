@@ -357,10 +357,10 @@ def run(host: str, share: str, directory: str, commands: Iterable[str],
             argv, capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        raise SmbError(f"smbclient timed out after {timeout}s ({host}/{share})", 3)
-    except FileNotFoundError:
-        raise SmbError("smbclient not found", 1)
+    except subprocess.TimeoutExpired as exc:
+        raise SmbError(f"smbclient timed out after {timeout}s ({host}/{share})", 3) from exc
+    except FileNotFoundError as exc:
+        raise SmbError("smbclient not found", 1) from exc
     out = (p.stdout or "") + (p.stderr or "")
     # A non-zero exit is normal for "no such file"; let callers decide.
     return p.returncode, out

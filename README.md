@@ -242,7 +242,8 @@ minas-skill/
   docs/USAGE.md            # 与 README 同步的使用说明
   locales/zh-CN.json       # 技能显示元数据（displayName / brief）
   locales/en-US.json       # 英文显示元数据
-  .github/workflows/       # gitleaks 密钥扫描 + 单测 CI
+  pyproject.toml           # ruff / pytest 配置（本仓不是可分发包，故无 [project]）
+  .github/workflows/       # gitleaks 密钥扫描 + 单测 + ruff + CodeQL
   .github/dependabot.yml   # actions 版本每周分组升级
   .gitignore
 ```

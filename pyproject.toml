@@ -1,0 +1,17 @@
+# Tooling configuration for the minas-skill repository.
+#
+# This repo is an agent skill (plus its CLI scripts), not a distributable
+# package, so there is deliberately no [build-system] / [project] table here:
+# the scripts are run in place (`python scripts/minas.py ...`). The file exists
+# so ruff and pytest behave the same locally and in CI.
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+
+[tool.pytest.ini_options]
+# The suite is unittest-based; pytest is only a convenience runner.
+testpaths = ["tests"]
