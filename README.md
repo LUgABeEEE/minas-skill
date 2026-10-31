@@ -240,8 +240,10 @@ minas-skill/
     samba-surface.md       # 探测结论
     examples.md            # 示例
   docs/USAGE.md            # 与 README 同步的使用说明
-  locales/zh-CN.json       # 技能显示元数据
+  locales/zh-CN.json       # 技能显示元数据（displayName / brief）
+  locales/en-US.json       # 英文显示元数据
   .github/workflows/       # gitleaks 密钥扫描 + 单测 CI
+  .github/dependabot.yml   # actions 版本每周分组升级
   .gitignore
 ```
 

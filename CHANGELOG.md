@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 
 - **POSIX backend (Linux / macOS).** `scripts/minas_smb.py` adds an
@@ -38,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dirs_exist_ok` (same semantics as the Windows `shutil` path).
 - `ensure_session()` is a no-op on POSIX (each `smbclient` call authenticates on
   its own) instead of pretending to establish a session.
+
+### Changed
+
+- `locales/`: the display keys are now `displayName` / `brief` — the names the
+  Plugins page actually reads, so the skill no longer shows an empty name and
+  brief — and the missing `locales/en-US.json` was added, matching the
+  `minas-webdav` skill. The UTF-8 BOM is gone from `zh-CN.json`.
+- CI: a weekly, grouped Dependabot update now keeps the workflow action versions
+  current (`.github/dependabot.yml`).
 
 ## [0.2.0] - 2026-10-26
 
@@ -73,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LUgABeEEE/minas-skill/releases/tag/v0.1.0
