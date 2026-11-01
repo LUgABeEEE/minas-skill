@@ -1,3 +1,6 @@
+permissions:
+  contents: read
+
 # SPDX-License-Identifier: Apache-2.0
 name: tests
 on:
