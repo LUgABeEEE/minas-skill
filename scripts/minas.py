@@ -343,7 +343,8 @@ def _wnet_add(target: str, user: str, password: str) -> tuple[int, str]:
     Returns (code, message). code 0 == success.
     """
     import ctypes
-    from ctypes import wintypes
+
+    wintypes = ctypes.wintypes
 
     class NETRESOURCE(ctypes.Structure):
         _fields_ = [

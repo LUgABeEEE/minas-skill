@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tests/test_minas.py` imports `unittest.mock` as `mock` and `scripts/minas.py`
+  reaches `wintypes` through the `ctypes` module, which clears the two
+  `py/import-and-import-from` notes CodeQL raised (module-and-name imported
+  twice in the same scope).
+
 ## [0.3.2] - 2026-11-05
 
 ### Added
