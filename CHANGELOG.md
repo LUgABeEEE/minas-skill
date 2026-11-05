@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-05
+
+### Changed
+
+- Copyright holder in `NOTICE`, `README.md` and the `# Copyright` headers of
+  `scripts/` and `tests/` is now `LUgABeEEE` (the GitHub account name) instead
+  of the previous mixed `g1394` / `missfor100` spellings.
+
 ## [0.3.3] - 2026-11-05
 
 ### Changed
@@ -143,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...v0.3.1
