@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-05
+
+### Added
+
+- `Release` workflow: pushing a `vX.Y.Z` tag now publishes a GitHub release whose
+  body is the matching CHANGELOG section. It uses the preinstalled `gh` CLI and
+  `GITHUB_TOKEN` — no third-party release action to pin or audit — and fails
+  loudly when the CHANGELOG has no section for that version.
+- CI: `ruff format --check .` next to `ruff check .`, so formatting gates PRs.
+
+### Changed
+
+- Repo-wide `ruff format` pass (whitespace only, no behaviour change).
+- `CONTRIBUTING.md`: code-style note (ruff/format gate) and the release
+  checklist now document the tag-driven flow.
+
 ## [0.3.1] - 2026-11-01
 
 ### Added
@@ -103,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.1.0...v0.2.0

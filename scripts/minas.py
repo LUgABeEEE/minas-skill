@@ -59,6 +59,7 @@ Platform notes (Linux):
     round trip when the server refuses; recursive copies walk the tree.
   * Credentials never touch argv: they go into a 0600 temp file passed via -A.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -88,11 +89,13 @@ def _smb() -> Any:
     global _SMB_MOD
     if _SMB_MOD is None:
         import minas_smb  # noqa: WPS433 (deliberate lazy import)
+
         _SMB_MOD = minas_smb
     return _SMB_MOD
 
 
 # --------------- path helpers ---------------
+
 
 def norm_unc(path: str) -> str:
     """Normalize a UNC or local path to backslash form on Windows."""
@@ -169,6 +172,7 @@ def to_local(path: str) -> Any:
 
 # ---- shutil shims: same call sites work with local or remote endpoints -----
 
+
 def fs_copy2(src: Any, dst: Any) -> None:
     if IS_WINDOWS:
         shutil.copy2(str(src), str(dst))
@@ -224,6 +228,7 @@ def remote_exists(p: Path, display: str) -> bool:
 
 
 # --------------- SMB session helpers ---------------
+
 
 def setting(name: str, default: str = "") -> str:
     """Resolve a MINAS_* setting: environment, then the shared credentials file.
@@ -409,8 +414,7 @@ def _map_remote(target: str, user: str, password: str | None, interactive: bool)
             return 1, "", f"{type(e).__name__}: {e} ({msg})"
     # Non-Windows: last resort (password would be visible in process list)
     print(
-        "security warning: password passed on the command line "
-        "(no WNetAddConnection2 available on this platform)",
+        "security warning: password passed on the command line (no WNetAddConnection2 available on this platform)",
         file=sys.stderr,
     )
     return run_net(["use", target, f"/user:{user}", password], capture=True)
@@ -505,9 +509,24 @@ def list_shares(host: str) -> tuple[int, list[str]]:
                 names.append(toks[0])
         # unique preserve order; drop locale header noise tokens
         noise = {
-            "the", "command", "completed", "successfully", "there",
-            "命令", "成功", "完成", "的", "共享名", "资源", "注释",
-            "什么", "都不", "是", "有", "列出", "主机",
+            "the",
+            "command",
+            "completed",
+            "successfully",
+            "there",
+            "命令",
+            "成功",
+            "完成",
+            "的",
+            "共享名",
+            "资源",
+            "注释",
+            "什么",
+            "都不",
+            "是",
+            "有",
+            "列出",
+            "主机",
         }
         out_names = []
         for n in names:
@@ -522,6 +541,7 @@ def list_shares(host: str) -> tuple[int, list[str]]:
 
 # --------------- file ops ---------------
 
+
 def cmd_shares(_client: Any, args: argparse.Namespace) -> int:
     host = args.host or smb_env()["host"]
     if not host:
@@ -531,11 +551,9 @@ def cmd_shares(_client: Any, args: argparse.Namespace) -> int:
     if code != 0:
         # 查询失败 ≠ 没有共享：必须以非 0 退出码暴露给 agent
         if code == 127:
-            print("net command not found (install Samba's smbclient on POSIX)",
-                  file=sys.stderr)
+            print("net command not found (install Samba's smbclient on POSIX)", file=sys.stderr)
             return 1
-        print(f"share enumeration failed for {host} (exit {code}); "
-              f"check network/credentials", file=sys.stderr)
+        print(f"share enumeration failed for {host} (exit {code}); check network/credentials", file=sys.stderr)
         return 3
     if args.json:
         print(json.dumps({"host": host, "shares": names}, ensure_ascii=False, indent=2))
@@ -561,11 +579,7 @@ def cmd_ls(_client: Any, args: argparse.Namespace) -> int:
             try:
                 st = child.stat()
                 size = st.st_size if child.is_file() else 0
-                modified = (
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))
-                    if child.is_file()
-                    else ""
-                )
+                modified = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)) if child.is_file() else ""
             except OSError:
                 # stat 失败：不要复用上一轮的 st，否则会给出错误的 mtime
                 size = 0

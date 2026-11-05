@@ -49,7 +49,21 @@ See [SECURITY.md](SECURITY.md).
 - Standard library only; type hints on public functions.
 - Comments explain *why* a guard exists (especially around path safety).
 - Prefer small pure helpers so they stay unit-testable offline.
+- `pyproject.toml` configures `ruff` (line length 120, rules `E,F,W,I,B`);
+  CI runs `ruff check .` **and** `ruff format --check .`, so run
+  `ruff format .` before opening a PR.
 
 ## Release notes
 
-Maintainers update `CHANGELOG.md` (Keep a Changelog) before tagging.
+Maintainers update `CHANGELOG.md` (Keep a Changelog) before tagging. Moving the
+[Unreleased] notes into `## [X.Y.Z] - YYYY-MM-DD` is enough: pushing the tag is
+the whole release.
+
+```bash
+ruff check . && ruff format --check . && python -m unittest discover -s tests
+git tag -a vX.Y.Z -m "minas-skill X.Y.Z"
+git push --follow-tags
+```
+
+The `Release` workflow (`.github/workflows/release.yml`) then publishes a GitHub
+release whose body is that CHANGELOG section — no manual `gh release create`.

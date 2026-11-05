@@ -36,6 +36,7 @@ Design notes
   with the offending line instead of silently returning wrong metadata. Run
   ``minas.py selftest <path>`` to validate the parser against your own server.
 """
+
 from __future__ import annotations
 
 import atexit
@@ -62,9 +63,7 @@ _LS_ENTRY = re.compile(
     r"\s+(?P<date>[A-Z][a-z]{2} [A-Z][a-z]{2}\s+\d{1,2} [\d:]+\s+\d{4})$"
 )
 # trailing " 12345 blocks of size 1024. 6789 blocks available" (dir/du)
-_LS_FOOTER = re.compile(
-    r"(\d+)\s+blocks of size\s+(\d+)\.?\s+(\d+)\s+blocks available", re.I
-)
+_LS_FOOTER = re.compile(r"(\d+)\s+blocks of size\s+(\d+)\.?\s+(\d+)\s+blocks available", re.I)
 # Errors that mean "network/auth problem" → exit 3, vs "does not exist" → exit 2.
 _NET_ERRORS = (
     "NT_STATUS_LOGON_FAILURE",
@@ -119,6 +118,7 @@ def _require_smbclient() -> str:
 
 
 # ---------------------------------------------------------------- credentials
+
 
 def default_cred_file() -> Path:
     """Shared credentials file — same location minas-webdav uses."""
@@ -237,8 +237,8 @@ def password_from_text(text: str) -> str:
         if key in parsed:
             return parsed[key]
     if parsed:
-        return ""          # looked like an env/cred file but carried no password
-    return text.strip()    # a bare password file
+        return ""  # looked like an env/cred file but carried no password
+    return text.strip()  # a bare password file
 
 
 def _password(host: str, share: str = "") -> tuple[str, str]:
@@ -261,8 +261,7 @@ def _password(host: str, share: str = "") -> tuple[str, str]:
         path = Path(pw_file)
         if not path.is_file():
             raise SmbError(f"MINAS_PASSWORD_FILE not readable: {pw_file}", 3)
-        return setting("MINAS_USER"), password_from_text(
-            path.read_text(encoding="utf-8", errors="replace"))
+        return setting("MINAS_USER"), password_from_text(path.read_text(encoding="utf-8", errors="replace"))
 
     env_user = os.environ.get("MINAS_USER", "")
     env_pw = os.environ.get("MINAS_PASSWORD") or os.environ.get("MINAS_PASS") or ""
@@ -330,6 +329,7 @@ def _auth_args(host: str, share: str = "") -> list[str]:
 
 # ---------------------------------------------------------------- invocation
 
+
 def q(value: str) -> str:
     """Quote an smbclient ``-c`` operand, rejecting characters we cannot escape."""
     if any(ch in value for ch in ('"', ";", "\n", "\r")):
@@ -337,8 +337,7 @@ def q(value: str) -> str:
     return f'"{value}"'
 
 
-def run(host: str, share: str, directory: str, commands: Iterable[str],
-        timeout: int = 60) -> tuple[int, str]:
+def run(host: str, share: str, directory: str, commands: Iterable[str], timeout: int = 60) -> tuple[int, str]:
     """Run smbclient once. ``directory`` (if any) is set with ``-D``.
 
     Returns (returncode, combined output). Raises SmbError on a failed run.
@@ -354,8 +353,12 @@ def run(host: str, share: str, directory: str, commands: Iterable[str],
         argv += ["-c", "; ".join(cmd_list)]
     try:
         p = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout,
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         raise SmbError(f"smbclient timed out after {timeout}s ({host}/{share})", 3) from exc
@@ -366,14 +369,12 @@ def run(host: str, share: str, directory: str, commands: Iterable[str],
     return p.returncode, out
 
 
-def run_checked(host: str, share: str, directory: str,
-                commands: Iterable[str], timeout: int = 60) -> str:
+def run_checked(host: str, share: str, directory: str, commands: Iterable[str], timeout: int = 60) -> str:
     """Like :func:`run`, but raises when the output carries an SMB error."""
     code, out = run(host, share, directory, commands, timeout)
     err = _error_line(out)
     if err:
-        raise SmbError(f"{err} ({host}/{share}{('/' + directory) if directory else ''})",
-                       classify(err))
+        raise SmbError(f"{err} ({host}/{share}{('/' + directory) if directory else ''})", classify(err))
     if code != 0:
         raise SmbError(f"smbclient exit {code} ({host}/{share})", 1)
     return out
@@ -391,8 +392,10 @@ def _error_line(out: str) -> str:
 
 # ---------------------------------------------------------------- parsing
 
+
 def _split(path: str) -> tuple[str, str, str]:
     from minas import parse_unc  # local import: minas.py imports us lazily
+
     return parse_unc(path)
 
 
@@ -424,12 +427,14 @@ def parse_listing(out: str) -> list[dict[str, Any]]:
         name = m.group("name").strip()
         if name in (".", ".."):
             continue
-        entries.append({
-            "name": name,
-            "is_dir": "D" in m.group("attr").upper(),
-            "size": int(m.group("size")),
-            "mtime": _parse_date(m.group("date")),
-        })
+        entries.append(
+            {
+                "name": name,
+                "is_dir": "D" in m.group("attr").upper(),
+                "size": int(m.group("size")),
+                "mtime": _parse_date(m.group("date")),
+            }
+        )
     if junk and not entries:
         raise SmbError(
             "cannot parse smbclient listing output; raw sample:\n  "
@@ -438,13 +443,13 @@ def parse_listing(out: str) -> list[dict[str, Any]]:
             1,
         )
     if junk:
-        print(f"warning: {len(junk)} unparsed listing line(s); first: {junk[0].strip()!r}",
-              file=sys.stderr)
+        print(f"warning: {len(junk)} unparsed listing line(s); first: {junk[0].strip()!r}", file=sys.stderr)
     return entries
 
 
 def _parse_date(text: str) -> float:
     import time as _t
+
     for fmt in ("%a %b %d %H:%M:%S %Y", "%a %b %d %H:%M %Y"):
         try:
             return _t.mktime(_t.strptime(text, fmt))
@@ -505,6 +510,7 @@ def invalidate(host: str, share: str, directory: str = "") -> None:
 
 
 # ---------------------------------------------------------------- SmbPath
+
 
 class _Stat:
     __slots__ = ("st_size", "st_mtime", "st_mode")
@@ -659,13 +665,14 @@ class SmbPath:
 
 # ---------------------------------------------------------------- transfers
 
+
 def download(remote: Any, local: Path) -> None:
     """remote (SmbPath) → local file."""
     host, share, inner = _split(str(remote))
     parent_inner, _, name = inner.rpartition("\\")
     local = Path(local)
     local.parent.mkdir(parents=True, exist_ok=True)
-    cmds = [f'lcd {q(str(local.parent))}', f"get {q(name)} {q(local.name)}"]
+    cmds = [f"lcd {q(str(local.parent))}", f"get {q(name)} {q(local.name)}"]
     run_checked(host, share, parent_inner, cmds, timeout=600)
 
 
@@ -674,14 +681,16 @@ def upload(local: Path, remote: Any) -> None:
     host, share, inner = _split(str(remote))
     parent_inner, _, name = inner.rpartition("\\")
     local = Path(local)
-    SmbPath(str(remote).rsplit("\\", 1)[0] if parent_inner else
-            "\\\\" + "\\".join(_split(str(remote))[:2])).mkdir(parents=True, exist_ok=True)
-    cmds = [f'lcd {q(str(local.parent))}', f"put {q(local.name)} {q(name)}"]
+    SmbPath(str(remote).rsplit("\\", 1)[0] if parent_inner else "\\\\" + "\\".join(_split(str(remote))[:2])).mkdir(
+        parents=True, exist_ok=True
+    )
+    cmds = [f"lcd {q(str(local.parent))}", f"put {q(local.name)} {q(name)}"]
     run_checked(host, share, parent_inner, cmds, timeout=600)
     invalidate(host, share, parent_inner)
 
 
 # ---------------------------------------------------------------- fs_* shims
+
 
 def _is_smb(obj: Any) -> bool:
     return isinstance(obj, SmbPath)
@@ -712,8 +721,7 @@ def _server_copy_file(src: SmbPath, dst: SmbPath) -> None:
             invalidate(s_host, s_share, d_inner.rpartition("\\")[0])
             return
         except SmbError as e:
-            print(f"note: server-side scopy failed ({e}); using a local round trip",
-                  file=sys.stderr)
+            print(f"note: server-side scopy failed ({e}); using a local round trip", file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="minas-cp-") as tmp:
         mid = Path(tmp) / (s_name or "blob")
         download(src, mid)
@@ -748,8 +756,7 @@ def fs_move(src: Any, dst: Any) -> None:
                 invalidate(s_host, s_share)
                 return
             except SmbError as e:
-                print(f"note: server-side rename failed ({e}); copying then deleting",
-                      file=sys.stderr)
+                print(f"note: server-side rename failed ({e}); copying then deleting", file=sys.stderr)
         fs_copy2(src, dst)
         fs_rmtree(src)
         return
@@ -801,13 +808,13 @@ def fs_disk_usage(path: Any) -> Any:
 
 # ---------------------------------------------------------------- shares
 
+
 def list_shares(host: str) -> tuple[int, list[str]]:
     """Enumerate shares with ``smbclient -L``. Returns (exit_code, names)."""
     exe = _require_smbclient()
     argv = [exe, "-L", f"//{host}"] + _auth_args(host, "") + ["-m", "SMB3"]
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30)
+        p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     except subprocess.TimeoutExpired:
         return 3, []
     out = (p.stdout or "") + (p.stderr or "")
@@ -832,6 +839,6 @@ def list_shares(host: str) -> tuple[int, list[str]]:
         if err:
             return classify(err), []
         if "Anonymous login successful" in out:
-            return 0, []          # logged in, but no shares visible to us
+            return 0, []  # logged in, but no shares visible to us
         return 1, []
     return 0, names

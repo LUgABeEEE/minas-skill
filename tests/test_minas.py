@@ -14,6 +14,7 @@
 
 运行：python -m unittest discover -s tests -v
 """
+
 from __future__ import annotations
 
 import errno
@@ -59,9 +60,7 @@ class TestPathHelpers(unittest.TestCase):
             minas.parse_unc("\\\\host")
 
     def test_collapse_dots(self):
-        self.assertEqual(
-            minas.collapse_unc("//host/share/a/./b/../c"), "\\\\host\\share\\a\\c"
-        )
+        self.assertEqual(minas.collapse_unc("//host/share/a/./b/../c"), "\\\\host\\share\\a\\c")
 
     def test_collapse_cannot_escape_share(self):
         with self.assertRaises(ValueError):
@@ -82,15 +81,11 @@ class TestSafeRemote(unittest.TestCase):
 
     def test_normalizes_dotdot_before_root_check(self):
         with mock.patch.dict(os.environ, {"MINAS_ROOT": "\\\\nas\\share"}):
-            self.assertEqual(
-                minas.safe_remote("//nas/share/a/../b"), "\\\\nas\\share\\b"
-            )
+            self.assertEqual(minas.safe_remote("//nas/share/a/../b"), "\\\\nas\\share\\b")
 
     def test_root_inside_ok_case_insensitive(self):
         with mock.patch.dict(os.environ, {"MINAS_ROOT": "\\\\nas\\share"}):
-            self.assertEqual(
-                minas.safe_remote("\\\\NAS\\SHARE\\photos"), "\\\\NAS\\SHARE\\photos"
-            )
+            self.assertEqual(minas.safe_remote("\\\\NAS\\SHARE\\photos"), "\\\\NAS\\SHARE\\photos")
 
     def test_root_equal_ok(self):
         with mock.patch.dict(os.environ, {"MINAS_ROOT": "\\\\nas\\share"}):
@@ -197,11 +192,12 @@ class TestExitCodes(unittest.TestCase):
     def test_shares_failure_returns_3(self):
         # Pin the Windows backend: these two cases cover the `net view` parsing
         # path, which must stay tested even when the suite runs on POSIX.
-        with mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.object(
-            minas, "ensure_session"
-        ), mock.patch.object(
-            minas, "run_net", return_value=(2, "", "System error 53")
-        ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}):
+        with (
+            mock.patch.object(minas, "IS_WINDOWS", True),
+            mock.patch.object(minas, "ensure_session"),
+            mock.patch.object(minas, "run_net", return_value=(2, "", "System error 53")),
+            mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}),
+        ):
             self.assertEqual(minas.main(["shares"]), 3)
 
     def test_shares_success_parses_rows(self):
@@ -213,11 +209,13 @@ class TestExitCodes(unittest.TestCase):
             "The command completed successfully.\n"
         )
         buf = io.StringIO()
-        with mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.object(
-            minas, "ensure_session"
-        ), mock.patch.object(
-            minas, "run_net", return_value=(0, sample, "")
-        ), mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}), redirect_stdout(buf):
+        with (
+            mock.patch.object(minas, "IS_WINDOWS", True),
+            mock.patch.object(minas, "ensure_session"),
+            mock.patch.object(minas, "run_net", return_value=(0, sample, "")),
+            mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}),
+            redirect_stdout(buf),
+        ):
             rc = minas.main(["shares", "--json"])
         self.assertEqual(rc, 0)
         data = json.loads(buf.getvalue())
@@ -283,11 +281,12 @@ class TestPosixSmbBackend(unittest.TestCase):
             seen["authfile"] = argv[argv.index("-A") + 1] if "-A" in argv else None
             return R()
 
-        with mock.patch.dict(
-            os.environ, {"MINAS_USER": "u", "MINAS_PASS": "TOPSECRET"}, clear=False
-        ), mock.patch.object(self.smb.subprocess, "run", fake_run), mock.patch.object(
-            self.smb, "SMBCLIENT", "/usr/bin/smbclient"
-        ), mock.patch.object(self.smb, "_AUTH_FILE", None):
+        with (
+            mock.patch.dict(os.environ, {"MINAS_USER": "u", "MINAS_PASS": "TOPSECRET"}, clear=False),
+            mock.patch.object(self.smb.subprocess, "run", fake_run),
+            mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"),
+            mock.patch.object(self.smb, "_AUTH_FILE", None),
+        ):
             self.smb.run("host", "share", "", ["ls"])
         argv, authfile = seen["argv"], seen["authfile"]
         self.assertNotIn("TOPSECRET", " ".join(argv))
@@ -315,12 +314,13 @@ class TestPosixSmbBackend(unittest.TestCase):
                 seen["existed_at_call"] = _os.path.exists(seen["auth"])
             return R()
 
-        with mock.patch.dict(os.environ, {"MINAS_USER": "u", "MINAS_PASS": "x"}), \
-                mock.patch.object(self.smb.subprocess, "run", fake_run), \
-                mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"), \
-                mock.patch.object(self.smb, "_AUTH_FILE", None), \
-                mock.patch.object(_os, "fchmod", side_effect=AttributeError("no fchmod"),
-                                  create=True):
+        with (
+            mock.patch.dict(os.environ, {"MINAS_USER": "u", "MINAS_PASS": "x"}),
+            mock.patch.object(self.smb.subprocess, "run", fake_run),
+            mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"),
+            mock.patch.object(self.smb, "_AUTH_FILE", None),
+            mock.patch.object(_os, "fchmod", side_effect=AttributeError("no fchmod"), create=True),
+        ):
             self.smb.run("host", "share", "", ["ls"])
 
         self.assertIn("-A", seen["argv"])
@@ -344,12 +344,12 @@ class TestPosixSmbBackend(unittest.TestCase):
             return R()
 
         env = {k: v for k, v in os.environ.items() if k != "MINAS_USER"}
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
-            self.smb.subprocess, "run", fake_run
-        ), mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"), mock.patch.object(
-            self.smb, "_cred_file_env", lambda: {}
-        ), mock.patch.object(
-            self.smb, "_fstab_credentials", lambda *a, **k: ("", "")
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(self.smb.subprocess, "run", fake_run),
+            mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"),
+            mock.patch.object(self.smb, "_cred_file_env", lambda: {}),
+            mock.patch.object(self.smb, "_fstab_credentials", lambda *a, **k: ("", "")),
         ):
             self.smb.run("host", "share", "", ["ls"])
         argv = seen["argv"]
@@ -363,31 +363,35 @@ class TestPosixSmbBackend(unittest.TestCase):
         挂载账号；通用文件若抢先命中，SMB 就会拿错账号 → LOGON_FAILURE。
         """
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
-        with mock.patch.dict(os.environ, clean, clear=True), mock.patch.object(
-            self.smb, "_cred_file_env",
-            lambda: {"MINAS_USER": "webdav-user", "MINAS_PASS": "webdav-pass"},
-        ), mock.patch.object(
-            self.smb, "_fstab_credentials", lambda host, share: ("smb-user", "smb-pass")
+        with (
+            mock.patch.dict(os.environ, clean, clear=True),
+            mock.patch.object(
+                self.smb,
+                "_cred_file_env",
+                lambda: {"MINAS_USER": "webdav-user", "MINAS_PASS": "webdav-pass"},
+            ),
+            mock.patch.object(self.smb, "_fstab_credentials", lambda host, share: ("smb-user", "smb-pass")),
         ):
             self.assertEqual(self.smb._password("nas", "share"), ("smb-user", "smb-pass"))
 
     def test_generic_file_used_when_share_not_mounted(self):
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
-        with mock.patch.dict(os.environ, clean, clear=True), mock.patch.object(
-            self.smb, "_cred_file_env", lambda: {"MINAS_USER": "u", "MINAS_PASS": "p"}
-        ), mock.patch.object(
-            self.smb, "_fstab_credentials", lambda host, share: ("", "")
+        with (
+            mock.patch.dict(os.environ, clean, clear=True),
+            mock.patch.object(self.smb, "_cred_file_env", lambda: {"MINAS_USER": "u", "MINAS_PASS": "p"}),
+            mock.patch.object(self.smb, "_fstab_credentials", lambda host, share: ("", "")),
         ):
             self.assertEqual(self.smb._password("nas", "share"), ("u", "p"))
 
     def test_environment_beats_mount_and_file(self):
-        with mock.patch.dict(
-            os.environ, {"MINAS_USER": "env-u", "MINAS_PASS": "env-p"}, clear=False
-        ), mock.patch.object(
-            self.smb, "_cred_file_env",
-            lambda: {"MINAS_USER": "file-u", "MINAS_PASS": "file-p"},
-        ), mock.patch.object(
-            self.smb, "_fstab_credentials", lambda host, share: ("mnt-u", "mnt-p")
+        with (
+            mock.patch.dict(os.environ, {"MINAS_USER": "env-u", "MINAS_PASS": "env-p"}, clear=False),
+            mock.patch.object(
+                self.smb,
+                "_cred_file_env",
+                lambda: {"MINAS_USER": "file-u", "MINAS_PASS": "file-p"},
+            ),
+            mock.patch.object(self.smb, "_fstab_credentials", lambda host, share: ("mnt-u", "mnt-p")),
         ):
             self.assertEqual(self.smb._password("nas", "share"), ("env-u", "env-p"))
 
@@ -407,8 +411,10 @@ class TestPosixSmbBackend(unittest.TestCase):
             stdout = sample
             stderr = ""
 
-        with mock.patch.object(self.smb.subprocess, "run", lambda *a, **k: R()), \
-                mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"):
+        with (
+            mock.patch.object(self.smb.subprocess, "run", lambda *a, **k: R()),
+            mock.patch.object(self.smb, "SMBCLIENT", "/usr/bin/smbclient"),
+        ):
             code, names = self.smb.list_shares("nas")
         self.assertEqual(code, 0)
         self.assertEqual(names, ["IPC$", "backup"])
@@ -490,17 +496,20 @@ class TestResolvePassword(unittest.TestCase):
         pw_file = Path(tempfile.mkdtemp()) / "pw.txt"
         self.addCleanup(shutil.rmtree, pw_file.parent, True)
         pw_file.write_text("secret-from-file\n", encoding="utf-8")
-        with mock.patch.dict(os.environ, {"MINAS_PASSWORD_FILE": str(pw_file)}), mock.patch.object(
-            sys, "stdin", mock.Mock(isatty=lambda: True)
-        ), mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)):
+        with (
+            mock.patch.dict(os.environ, {"MINAS_PASSWORD_FILE": str(pw_file)}),
+            mock.patch.object(sys, "stdin", mock.Mock(isatty=lambda: True)),
+            mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)),
+        ):
             self.assertEqual(minas.resolve_password(), "secret-from-file")
 
     def test_interactive_star_when_no_file(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("MINAS_")}
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
-            sys, "stdin", mock.Mock(isatty=lambda: True)
-        ), mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)), mock.patch.object(
-            minas, "IS_WINDOWS", True
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(sys, "stdin", mock.Mock(isatty=lambda: True)),
+            mock.patch.object(sys, "stdout", mock.Mock(isatty=lambda: True)),
+            mock.patch.object(minas, "IS_WINDOWS", True),
         ):
             self.assertEqual(minas.resolve_password(), "*")
 
@@ -516,9 +525,11 @@ class TestMapRemoteNoPasswordInArgv(unittest.TestCase):
         def fake_wnet(target, user, password):
             return 0, ""
 
-        with mock.patch.object(minas, "run_net", side_effect=fake_run_net), mock.patch.object(
-            minas, "_wnet_add", side_effect=fake_wnet
-        ), mock.patch.object(minas, "IS_WINDOWS", True):
+        with (
+            mock.patch.object(minas, "run_net", side_effect=fake_run_net),
+            mock.patch.object(minas, "_wnet_add", side_effect=fake_wnet),
+            mock.patch.object(minas, "IS_WINDOWS", True),
+        ):
             code, out, err = minas._map_remote("\\\\nas\\share", "u", "p@ss", False)
         self.assertEqual(code, 0)
         for args in seen:
@@ -531,8 +542,9 @@ class TestMapRemoteNoPasswordInArgv(unittest.TestCase):
             seen.append(list(args))
             return 0, "", ""
 
-        with mock.patch.object(minas, "run_net", side_effect=fake_run_net), mock.patch.object(
-            minas, "IS_WINDOWS", True
+        with (
+            mock.patch.object(minas, "run_net", side_effect=fake_run_net),
+            mock.patch.object(minas, "IS_WINDOWS", True),
         ):
             code, _, _ = minas._map_remote("\\\\nas\\share", "u", "*", True)
         self.assertEqual(code, 0)
@@ -580,10 +592,11 @@ class TestSharesChineseNoise(unittest.TestCase):
             "public     Disk\r\n"
             "命令成功完成。\r\n"
         )
-        with mock.patch.object(minas, "ensure_session"), mock.patch.object(
-            minas, "run_net", return_value=(0, sample, "")
-        ), mock.patch.object(minas, "IS_WINDOWS", True), mock.patch.dict(
-            os.environ, {"MINAS_HOST": "nas"}
+        with (
+            mock.patch.object(minas, "ensure_session"),
+            mock.patch.object(minas, "run_net", return_value=(0, sample, "")),
+            mock.patch.object(minas, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"MINAS_HOST": "nas"}),
         ):
             code, names = minas.list_shares("nas")
         self.assertEqual(code, 0)
