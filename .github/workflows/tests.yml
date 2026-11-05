@@ -33,3 +33,37 @@ jobs:
         run: ruff check .
       - name: format
         run: ruff format --check .
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install coverage
+      - name: Measure and enforce the coverage floor
+        # Ratchet, not a target: the measured baseline on 2026-11-05 was 45%
+        # (the Windows-only WNet/`net use` paths cannot run on Linux), so 44
+        # catches regressions without failing on incidental churn.
+        run: |
+          python -m coverage run --include="scripts/*" -m unittest discover -s tests
+          python -m coverage report --fail-under=44
+  # Single stable context for branch protection: matrix job names carry the
+  # interpreter version, so requiring them directly would break every time the
+  # matrix changes.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [unittest, lint, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every CI job succeeded
+        env:
+          UNITTEST: ${{ needs.unittest.result }}
+          LINT: ${{ needs.lint.result }}
+          COVERAGE: ${{ needs.coverage.result }}
+        run: |
+          echo "unittest=$UNITTEST lint=$LINT coverage=$COVERAGE"
+          for r in "$UNITTEST" "$LINT" "$COVERAGE"; do
+            [ "$r" = "success" ] || { echo "not green: $r"; exit 1; }
+          done

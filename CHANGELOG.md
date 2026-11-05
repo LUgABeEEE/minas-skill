@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI: a `coverage` job runs the suite under `coverage.py` over `scripts/` and
+  fails below 44% (measured baseline 45% on 2026-11-05; the Windows-only
+  WNet/`net use` paths cannot execute on the Linux runner).
+- CI: a `ci-ok` aggregate job exists so branch protection can require one stable
+  context instead of the interpreter-specific matrix names. `main` now requires
+  `ci-ok` on pull requests.
+
 ### Changed
 
 - `tests/test_minas.py` imports `unittest.mock` as `mock` and `scripts/minas.py`
