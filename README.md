@@ -272,7 +272,7 @@ python -m unittest discover -s tests -v
 本项目基于 [Apache License 2.0](LICENSE) 开源，版权声明与商标说明见 [NOTICE](NOTICE)。
 
 ```text
-Copyright 2026 missfor100
+Copyright 2026 LUgABeEEE
 SPDX-License-Identifier: Apache-2.0
 ```
 
