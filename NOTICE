@@ -1,8 +1,11 @@
 minas-skill
-Copyright 2026 missfor100
+Copyright 2026 g1394
 
 This product includes software developed for agent-driven file management
 over SMB/CIFS on user-owned Xiaomi Smart Storage (MINAS) devices.
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
 
 Xiaomi and Xiaomi Smart Storage are trademarks of Xiaomi Inc. This is a
 non-official, community tool and is not affiliated with, endorsed by, or

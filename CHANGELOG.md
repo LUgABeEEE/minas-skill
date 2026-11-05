@@ -7,21 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- CI: a `coverage` job runs the suite under `coverage.py` over `scripts/` and
-  fails below 44% (measured baseline 45% on 2026-11-05; the Windows-only
-  WNet/`net use` paths cannot execute on the Linux runner).
-- CI: a `ci-ok` aggregate job exists so branch protection can require one stable
-  context instead of the interpreter-specific matrix names. `main` now requires
-  `ci-ok` on pull requests.
+## [0.3.3] - 2026-11-05
 
 ### Changed
 
+- `# SPDX-License-Identifier: Apache-2.0` on every file under `scripts/`, so
+  licence scanners agree with the `LICENSE`/`NOTICE` pair (the workflows already
+  carried it).
+- `NOTICE` now names `g1394` as the copyright holder, matching `minas-webdav`
+  (it said `missfor100`); one holder name keeps future relicensing or transfer
+  straightforward.
 - `tests/test_minas.py` imports `unittest.mock` as `mock` and `scripts/minas.py`
   reaches `wintypes` through the `ctypes` module, which clears the two
   `py/import-and-import-from` notes CodeQL raised (module-and-name imported
   twice in the same scope).
+
+### Added
+
+- CI: a `coverage` job runs the suite under `coverage.py` over `scripts/` and
+  fails below 44% (measured baseline 46% on the runner, 2026-11-05; the
+  Windows-only WNet/`net use` paths cannot execute on the Linux runner).
+- CI: a `ci-ok` aggregate job so branch protection can require one stable
+  context instead of the interpreter-specific matrix names; `main` now requires
+  `ci-ok` on pull requests.
 
 ## [0.3.2] - 2026-11-05
 
@@ -135,7 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`shares` / `ls` / `du` / `tree` / `df` / `get` / `put` / `cat` / `mkdir` /
   `mv` / `cp` / `rm` / `find`), offline tests, gitleaks CI, Apache-2.0.
 
-[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/LUgABeEEE/minas-skill/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/LUgABeEEE/minas-skill/compare/v0.2.0...v0.3.0
