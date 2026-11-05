@@ -3,11 +3,15 @@ permissions:
 
 # SPDX-License-Identifier: Apache-2.0
 name: tests
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
   pull_request:
 jobs:
   unittest:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -19,27 +23,35 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
   lint:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: python -m pip install ruff
       - name: lint
         run: ruff check .
       - name: format
         run: ruff format --check .
   coverage:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: python -m pip install coverage
       - name: Measure and enforce the coverage floor
         # Ratchet, not a target: the measured baseline on 2026-11-05 was 45%
@@ -52,6 +64,7 @@ jobs:
   # interpreter version, so requiring them directly would break every time the
   # matrix changes.
   ci-ok:
+    timeout-minutes: 5
     name: ci-ok
     if: always()
     needs: [unittest, lint, coverage]
